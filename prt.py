@@ -48,12 +48,30 @@ elif sys.platform.startswith('linux'):
 else:
     raise NotImplementedError("This platform is not yet supported")
 
+
+def printf(message, *args, **kwargs):
+    color = kwargs.get('color')
+    attrs = kwargs.get('attrs')
+    sys.stdout.write(colored(message % args, color, attrs=attrs))
+    sys.stdout.flush()
+
+
+def get_auth_token():
+    try:
+        prefs = ET.parse(SETTINGS_PATH).getroot()
+        plex_auth_token = prefs.attrib['PlexOnlineToken']
+    except Exception, e:
+        printf("ERROR: Couldn't open settings file - %s", SETTINGS_PATH, color="red")
+        return False
+    return plex_auth_token
+
+
 DEFAULT_CONFIG = {
     "ipaddress": "",
     "path_script":    None,
     "servers_script": None,
     "servers":   {},
-    "auth_token": None,
+    "auth_token": get_auth_token(),
     "logging":   {
         "version": 1,
         "disable_existing_loggers": False,
@@ -116,37 +134,6 @@ def save_config(d):
     except Exception, e:
         print "Error loading config: %s" % str(e)
     return False
-
-
-def printf(message, *args, **kwargs):
-    color = kwargs.get('color')
-    attrs = kwargs.get('attrs')
-    sys.stdout.write(colored(message % args, color, attrs=attrs))
-    sys.stdout.flush()
-
-def get_auth_token():
-    url = "https://plex.tv/users/sign_in.json"
-    payload = urllib.urlencode({
-        "user[login]": raw_input("Plex Username: "),
-        "user[password]": getpass.getpass("Plex Password: "),
-        "X-Plex-Client-Identifier": "Plex-Remote-Transcoder-v%s" % __version__,
-        "X-Plex-Product": "Plex-Remote-Transcoder",
-        "X-Plex-Version": __version__
-    })
-
-    req = urllib2.Request(url, payload)
-    try:
-        res = urllib2.urlopen(req)
-    except:
-        print "Error getting auth token...invalid credentials?"
-        return False
-
-    if res.code not in [200, 201]:
-        print "Invalid credentials"
-        return False
-
-    data = json.load(res)
-    return data['user']['authToken']
 
 
 def get_system_load_local():
