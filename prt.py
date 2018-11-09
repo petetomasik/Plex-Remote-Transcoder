@@ -60,46 +60,43 @@ def get_auth_token():
     try:
         # Look for token in plexmediaserver SETTINGS_PATH file
         prefs = ET.parse(SETTINGS_PATH).getroot()
-        plex_auth_token = prefs.attrib['PlexOnlineToken']
-
-        if not plex_auth_token:
-            print "Couldn't find PlexOnlineToken in settings file - %s. Make sure your Plex Server is setup correctly.", SETTINGS_PATH
-            print "Obtaining Plex auth token from plex.tv..."
-
-            # Fallback to prompting for Plex username/password
-            url = "https://plex.tv/users/sign_in.json"
-            payload = urllib.urlencode({
-                "user[login]": raw_input("Plex Username: "),
-                "user[password]": getpass.getpass("Plex Password: "),
-                "X-Plex-Client-Identifier": "Plex-Remote-Transcoder-v%s" % __version__,
-                "X-Plex-Product": "Plex-Remote-Transcoder",
-                "X-Plex-Version": __version__
-            })
-            req = urllib2.Request(url, payload)
-
-            try:
-                res = urllib2.urlopen(req)
-            except:
-                print "Error getting auth token...invalid credentials?"
-                return False
-
-            if res.code not in [200, 201]:
-                print "Invalid credentials"
-                return False
-
-            data = json.load(res)
-            return data['user']['authToken']
-        else:
-            print "Using Plex auth token from settings file - %s." % SETTINGS_PATH
+        prefs_token = prefs.attrib['PlexOnlineToken']
 
     except KeyError, e:
-        printf("ERROR: PlexOnlineToken not found in settings file - %s", SETTINGS_PATH, color="red")
-        return False
+        print "Couldn't find PlexOnlineToken in settings file - %s." % SETTINGS_PATH
+        print "Obtaining Plex auth token from plex.tv..."
+
+        # Fallback to prompting for Plex username/password
+        url = "https://plex.tv/users/sign_in.json"
+        payload = urllib.urlencode({
+            "user[login]": raw_input("Plex Username: "),
+            "user[password]": getpass.getpass("Plex Password: "),
+            "X-Plex-Client-Identifier": "Plex-Remote-Transcoder-v%s" % __version__,
+            "X-Plex-Product": "Plex-Remote-Transcoder",
+            "X-Plex-Version": __version__
+        })
+        req = urllib2.Request(url, payload)
+
+        try:
+            res = urllib2.urlopen(req)
+        except:
+            print "Error getting auth token...invalid credentials?"
+            return False
+
+        if res.code not in [200, 201]:
+            print "Invalid credentials"
+            return False
+
+        data = json.load(res)
+        print "Using Plex auth token obtained from plex.tv"
+        return data['user']['authToken']
 
     except Exception, e:
         printf("ERROR: Couldn't open settings file - %s", SETTINGS_PATH, color="red")
         return False
-    return plex_auth_token
+
+    print "Using Plex auth token from settings file - %s." % SETTINGS_PATH
+    return prefs_token
 
 
 DEFAULT_CONFIG = {
