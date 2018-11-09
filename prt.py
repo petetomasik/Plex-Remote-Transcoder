@@ -354,7 +354,7 @@ def transcode_remote():
     # Look to see if we need to run an external script to get hosts
     if config.get("servers_script", None):
         try:
-            proc = subprocess.Popen([config["servers_script"]], stdout=subprocess.PIPE)
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
             proc.wait()
 
             servers = {}
@@ -544,8 +544,27 @@ def check_config():
         7: [settings['TranscoderTempDirectory']]
     }
 
+    servers = config["servers"]
+
+    # Look to see if we need to run an external script to get hosts
+    if config.get("servers_script", None):
+        try:
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
+            proc.wait()
+
+            servers = {}
+            for line in proc.stdout.readlines():
+                hostname, port, user = line.strip().split()
+                servers[hostname] = {
+                    "port": port,
+                    "user": user
+                }
+        except Exception, e:
+            log.error("Error retreiving host list via '%s': %s" % (config["servers_script"], str(e)))
+            servers = config["servers"]
+
     # Let's check SSH access
-    for address, server in config['servers'].items():
+    for address, server in servers.items():
         printf("Host %s\n", address)
 
         proc = subprocess.Popen(["ssh", "%s@%s" % (server["user"], address),
