@@ -90,10 +90,10 @@ def get_auth_token():
             data = json.load(res)
             return data['user']['authToken']
         else:
-            print "Using Plex auth token from settings file - %s.", SETTINGS_PATH
+            print "Using Plex auth token from settings file - %s." % SETTINGS_PATH
 
     except KeyError, e:
-        printf("ERROR: PlexOnlineToken not found in settings file - %s" , SETTINGS_PATH, color="red")
+        printf("ERROR: PlexOnlineToken not found in settings file - %s", SETTINGS_PATH, color="red")
         return False
 
     except Exception, e:
