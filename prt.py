@@ -642,6 +642,7 @@ def usage():
         "  overwrite             Fix PRT after PMS has had a version update breaking PRT\n" 
         "  add_host              Add an extra host to the list of slaves PRT is to use\n" 
         "  remove_host           Removes a host from the list of slaves PRT is to use\n"
+        "  auth_token            Add Plex auth token to configuration\n"
         "  sessions              Display current sessions\n"
         "  check_config          Checks the current configuration for errors\n")
 
@@ -674,16 +675,16 @@ def main():
     elif sys.argv[1] == "install":
         print "Installing Plex Remote Transcoder"
         config = get_config()
-
-        if raw_input("Add Plex auth token? [y/n]").lower() == "y":
-            config["auth_token"] = get_auth_token()
-            if config["auth_token"] is None:
-                print "Unable to add Plex auth token... Check prt.log"
-
         config["ipaddress"] = raw_input("IP address of this machine: ")
         save_config(config)
 
         install_transcoder()
+
+    elif sys.argv[1] == "auth_token":
+        print "Adding Plex auth token"
+        config = get_config()
+        config["auth_token"] = get_auth_token()
+        save_config(config)
 
     elif sys.argv[1] == "add_host":
         host = None
