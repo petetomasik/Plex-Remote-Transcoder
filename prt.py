@@ -58,8 +58,38 @@ def printf(message, *args, **kwargs):
 
 def get_auth_token():
     try:
+        # Look for token in plexmediaserver SETTINGS_PATH file
         prefs = ET.parse(SETTINGS_PATH).getroot()
         plex_auth_token = prefs.attrib['PlexOnlineToken']
+
+        if not plex_auth_token:
+            print "Couldn't find PlexOnlineToken in settings file - %S. Make sure your Plex Server is setup correctly.", SETTINGS_PATH
+            print "Obtaining Plex auth token from plex.tv..."
+
+            # Fallback to prompting for Plex username/password
+            url = "https://plex.tv/users/sign_in.json"
+            payload = urllib.urlencode({
+                "user[login]": raw_input("Plex Username: "),
+                "user[password]": getpass.getpass("Plex Password: "),
+                "X-Plex-Client-Identifier": "Plex-Remote-Transcoder-v%s" % __version__,
+                "X-Plex-Product": "Plex-Remote-Transcoder",
+                "X-Plex-Version": __version__
+            })
+            req = urllib2.Request(url, payload)
+
+            try:
+                res = urllib2.urlopen(req)
+            except:
+                print "Error getting auth token...invalid credentials?"
+                return False
+
+            if res.code not in [200, 201]:
+                print "Invalid credentials"
+                return False
+
+            data = json.load(res)
+            return data['user']['authToken']
+
     except Exception, e:
         printf("ERROR: Couldn't open settings file - %s", SETTINGS_PATH, color="red")
         return False
@@ -71,7 +101,7 @@ DEFAULT_CONFIG = {
     "path_script":    None,
     "servers_script": None,
     "servers":   {},
-    "auth_token": get_auth_token(),
+    "auth_token": None,
     "logging":   {
         "version": 1,
         "disable_existing_loggers": False,
@@ -644,6 +674,12 @@ def main():
     elif sys.argv[1] == "install":
         print "Installing Plex Remote Transcoder"
         config = get_config()
+
+        if raw_input("Add Plex auth token? [y/n]").lower() == "y":
+            config["auth_token"] = get_auth_token()
+            if config["auth_token"] is None:
+                print "Unable to add Plex auth token... Check prt.log"
+
         config["ipaddress"] = raw_input("IP address of this machine: ")
         save_config(config)
 
