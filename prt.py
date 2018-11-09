@@ -63,7 +63,7 @@ def get_auth_token():
         plex_auth_token = prefs.attrib['PlexOnlineToken']
 
         if not plex_auth_token:
-            print "Couldn't find PlexOnlineToken in settings file - %S. Make sure your Plex Server is setup correctly.", SETTINGS_PATH
+            print "Couldn't find PlexOnlineToken in settings file - %s. Make sure your Plex Server is setup correctly.", SETTINGS_PATH
             print "Obtaining Plex auth token from plex.tv..."
 
             # Fallback to prompting for Plex username/password
@@ -89,6 +89,12 @@ def get_auth_token():
 
             data = json.load(res)
             return data['user']['authToken']
+        else:
+            print "Using Plex auth token from settings file - %s.", SETTINGS_PATH
+
+    except KeyError, e:
+        printf("ERROR: PlexOnlineToken not found in settings file - %s" , SETTINGS_PATH, color="red")
+        return False
 
     except Exception, e:
         printf("ERROR: Couldn't open settings file - %s", SETTINGS_PATH, color="red")
