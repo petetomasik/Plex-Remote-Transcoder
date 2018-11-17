@@ -362,7 +362,7 @@ def transcode_remote():
     # Look to see if we need to run an external script to get hosts
     if config.get("servers_script", None):
         try:
-            proc = subprocess.Popen([config["servers_script"].split()], stdout=subprocess.PIPE)
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
             proc.wait()
 
             servers = {}
@@ -557,7 +557,7 @@ def check_config():
     # Look to see if we need to run an external script to get hosts
     if config.get("servers_script", None):
         try:
-            proc = subprocess.Popen([config["servers_script"].split()], stdout=subprocess.PIPE)
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
             proc.wait()
 
         servers = {}
