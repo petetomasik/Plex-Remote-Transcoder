@@ -19,6 +19,7 @@ import time
 import urllib
 import urllib2
 import uuid
+import Queue
 
 from distutils.spawn import find_executable
 
@@ -67,7 +68,7 @@ DEFAULT_CONFIG = {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "INFO",
                 "formatter": "simple",
-                "filename": "/tmp/prt.log",
+                "filename": "/opt/plex/tmp/prt.log",
                 "maxBytes": 10485760,
                 "backupCount": 20,
                 "encoding": "utf8"
@@ -86,6 +87,8 @@ DEFAULT_CONFIG = {
 # This is the name we give to the original transcoder, which must be renamed
 NEW_TRANSCODER_NAME      = "plex_transcoder"
 ORIGINAL_TRANSCODER_NAME = "Plex Transcoder"
+
+SEGMENTS_PER_NODE = 5
 
 REMOTE_ARGS = ("%(env)s;"
                "cd %(working_dir)s;"
@@ -299,6 +302,39 @@ def transcode_local():
         if output and is_debug:
             log.debug(output.strip('\n'))
 
+
+def get_available_remote_servers():
+    config = get_config()
+    servers = config["servers"]
+
+    # Look to see if we need to run an external script to get hosts
+    if config.get("servers_script", None):
+        log.info("servers_script found")
+        try:
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
+            proc.wait()
+        except Exception, e:
+            log.error("Error retreiving host list via '%s': %s" % (config["servers_script"], str(e)))
+
+        servers = {}
+        for line in proc.stdout.readlines():
+            hostname, port, user = line.strip().split()
+            servers[hostname] = {"port": port, "user": user}
+
+    available_servers = {}
+    for hostname, host in servers.items():
+        log.debug("Getting load for host '%s'" % hostname)
+        host["load"] = get_system_load_remote(hostname, host["port"], host["user"])
+        if not host["load"]:
+            # If no load is returned, then it is likely that the host
+            # is offline or unreachable
+            log.debug("Couldn't get load for host '%s'" % hostname)
+            continue
+        available_servers[hostname] = host
+    log.debug("Available servers : %s\n" % available_servers)
+    return available_servers
+
+
 def transcode_remote():
     setup_logging()
 
@@ -319,14 +355,6 @@ def transcode_remote():
 
     config = get_config()
     args   = sys.argv[1:]
-
-
-    # FIX: This is (temporary?) fix for the EasyAudioEncoder (EAE) which uses a
-    #      hardcoded path in /tmp.  If we find that EAE is being used then we
-    #      force transcoding on the master
-    if 'eae_prefix' in ' '.join(args):
-        log.info("Found EAE is being used...forcing local transcode")
-        return transcode_local()
 
     # Check to see if we need to call a user-script to replace/modify the file path
     if config.get("path_script", None):
@@ -362,7 +390,7 @@ def transcode_remote():
     # Look to see if we need to run an external script to get hosts
     if config.get("servers_script", None):
         try:
-            proc = subprocess.Popen([config["servers_script"]], stdout=subprocess.PIPE)
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
             proc.wait()
 
             servers = {}
@@ -375,54 +403,88 @@ def transcode_remote():
         except Exception, e:
             log.error("Error retreiving host list via '%s': %s" % (config["servers_script"], str(e)))
 
-    hostname, host = None, None
+    command = command.replace("127.0.0.1", config["ipaddress"]).split(' ')
+    if "-segment_time" in command:
+        segment_time = int(command[command.index("-segment_time") + 1])
+    
+    if "-ss" in command:
+        ss = int(command[command.index("-ss") + 1])
+    else:
+        ss = 0
+    
+    if "-segment_start_number" in command:
+        start_segment = int(command[command.index("-segment_start_number") + 1])
 
-    # Let's try to load-balance
-    min_load = None
-    for hostname, host in servers.items():
+    q = Queue.Queue()
+    init = True
+    just_finished = False
+    transcoding_servers = []
+    consecutive_errors = 0
+    log.info("Initializing distributed trancode %s" % command)
+    log.info("Segment time: %s" % segment_time)
 
-        log.debug("Getting load for host '%s'" % hostname)
-        load = get_system_load_remote(hostname, host["port"], host["user"])
+    while (consecutive_errors < 5) and (q.empty() is False or init is True or just_finished is True):
+        log.info("Fetching available servers")
+        available_servers = get_available_remote_servers()
+        log.info(available_servers)
+        just_finished = False
 
-        if not load:
-            # If no load is returned, then it is likely that the host
-            # is offline or unreachable
-            log.debug("Couldn't get load for host '%s'" % hostname)
+        for hostname, host in available_servers.items():
+            log.info("Checking server %s" % hostname)
+            if hostname in transcoding_servers:
+                log.info("Server already transcoding a segment")
+                continue
+
+            log.info("Starting trancoder with segment %s" % str(start_segment))
+            proc = process_segment(host, hostname, start_segment, segment_time, ss, command)
+            transcoding_servers.append(hostname)
+            start_segment+=SEGMENTS_PER_NODE
+            ss+=segment_time*SEGMENTS_PER_NODE
+            q.put((proc, hostname))
+            log.info("Queue size: %s" % q.qsize())
+
+        if init:
+            log.info("Distributed transcode initialized")
+            init = False
             continue
 
-        log.debug("Log for '%s': %s" % (hostname, str(load)))
+        proc, hostname = q.get()
+        log.info("Queue size: %s" % q.qsize())
+        log.info("Checking if %s finished transcode" % hostname)
+        code = proc.poll()
 
-        # XXX: Use more that just 1-minute load?
-        if min_load is None or min_load[1] > load[0]:
-            min_load = (hostname, load[0],)
+        if code is None:
+            q.put((proc, hostname))
+        else:
+            log.info("%s finished transcode" % hostname)
+            just_finished = True
+            if code == 1:
+                consecutive_errors += 1
+                log.info("Transcode returned an error (%s)" % str(consecutive_errors))
+            else:
+                consecutive_errors = 0
 
-    if min_load is None:
-        log.info("No hosts found...using local")
-        return transcode_local()
+            transcoding_servers.remove(hostname)
 
-    # Select lowest-load host
-    log.info("Host with minimum load is '%s'" % min_load[0])
-    hostname, host = min_load[0], servers[min_load[0]]
+        time.sleep(.300)
 
-    log.info("Using transcode host '%s'" % hostname)
-
-    # Remap the 127.0.0.1 reference to the proper address
-    #command = command.replace("127.0.0.1", config["ipaddress"])
-
-    #
-    # TODO: Remap file-path to PMS URLs
-    #
-
-    args = ["ssh", "-tt", "-R", "32400:127.0.0.1:32400", "%s@%s" % (host["user"], hostname), "-p", host["port"]] + [command]
+    log.info("Transcode finished")
 
 
-    log.info("Launching transcode_remote with args %s\n" % args)
+def process_segment (host, hostname, segment, time, ss, command):
+    command = ["ssh", "%s@%s" % (host["user"], hostname), "-p", host["port"]] + command
+    cmd = []
+
+    command[command.index("-segment_start_number") + 1] = str(segment)
+    try:
+        command[command.index("-ss") + 1] = str(ss)
+    except:
+        pass
+    command.insert(command.index("-i"), "-t")
+    command.insert(command.index("-i"), str(int(command[command.index("-segment_time") + 1]) * SEGMENTS_PER_NODE))
 
     # Spawn the process
-    proc = subprocess.Popen(args)
-    proc.wait()
-
-    log.info("Transcode stopped on host '%s'" % hostname)
+    return subprocess.Popen(command)
 
 
 def re_get(regex, string, group=0, default=None):
@@ -552,13 +614,28 @@ def check_config():
         7: [settings['TranscoderTempDirectory']]
     }
 
-    # Let's check SSH access
-    for address, server in config['servers'].items():
-        printf("Host %s\n", address)
+    servers = config["servers"]
+    # Look to see if we need to run an external script to get hosts
+    if config.get("servers_script", None):
+        try:
+            proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
+            proc.wait()
 
-        proc = subprocess.Popen(["ssh", "%s@%s" % (server["user"], address),
-            "-p", server["port"], "prt", "get_load"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            servers = {}
+            for line in proc.stdout.readlines():
+                hostname, port, user = line.strip().split()
+                servers[hostname] = {
+                    "port": port,
+                    "user": user
+                }
+    	except Exception, e:
+            log.error("Error retreiving host list via '%s': %s" % (config["servers_script"], str(e)))
+            servers = config["servers"]
+
+    # Let's check SSH access
+    for address, server in servers.items():
+        printf("Host %s\n", address)
+        proc = subprocess.Popen(["ssh", "%s@%s" % (server["user"], address), "-p", server["port"], "prt", "get_load"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         proc.wait()
 
         printf("  Connect: ")
