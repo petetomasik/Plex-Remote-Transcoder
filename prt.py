@@ -560,15 +560,16 @@ def check_config():
             proc = subprocess.Popen(config["servers_script"].split(), stdout=subprocess.PIPE)
             proc.wait()
 
-        servers = {}
-        for line in proc.stdout.readlines():
-            hostname, port, user = line.strip().split()
-            servers[hostname] = {
-                "port": port,
-                "user": user
-            }
-    except Exception, e:
-        log.error("Error retreiving host list via '%s': %s" % (config["servers_script"], str(e)))
+            servers = {}
+            for line in proc.stdout.readlines():
+                hostname, port, user = line.strip().split()
+                servers[hostname] = {
+                    "port": port,
+                    "user": user
+                }
+        except Exception, e:
+            log.error("Error retreiving host list via '%s': %s" % (config["servers_script"], str(e)))
+            servers = config["servers"]
 
     # Let's check SSH access
     for address, server in servers.items():
