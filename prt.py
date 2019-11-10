@@ -102,7 +102,7 @@ def get_auth_token():
 DEFAULT_CONFIG = {
     "ipaddress": "",
     "path_script":    None,
-    "servers_script": None,
+    "servers_script": "/usr/sbin/cluster-manager",
     "servers":   {},
     "auth_token": None,
     "logging":   {
@@ -339,6 +339,10 @@ def transcode_remote():
 
     config = get_config()
     args   = sys.argv[1:]
+
+    if 'eae_prefix' in ' '.join(args):
+        log.info("Found EAE is being used...forcing local transcode")
+        return transcode_local()
 
     # Check to see if we need to call a user-script to replace/modify the file path
     if config.get("path_script", None):
